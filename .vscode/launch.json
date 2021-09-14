@@ -1,0 +1,21 @@
+{
+    // Use IntelliSense to learn about possible attributes.
+    // Hover to view descriptions of existing attributes.
+    // For more information, visit: https://go.microsoft.com/fwlink/?linkid=830387
+    "version": "0.2.0",
+    "configurations": [
+
+        {
+            "name": "Python: Current File",
+            "type": "python",
+            "request": "launch",
+            "program": "main_simsiam.py",
+            "console": "integratedTerminal",
+            "args": [ "-a", "resnet50", 
+                "--dist-url", "tcp://localhost:10001",
+                "--gpu", "0", "--world-size", "1", "--rank", "0",
+                "--fix-pred-lr",
+                "-data", "/home/oester/projects/up-detr/data/ILSVRC/Data/CLS-LOC"]
+        }
+    ]
+}
