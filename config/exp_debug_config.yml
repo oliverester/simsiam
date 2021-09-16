@@ -1,0 +1,8 @@
+a: resnet50
+dist-url: tcp://localhost:10001
+gpu: 0
+world-size: 1 
+rank: 0 
+fix-pred-lr: true
+data: /home/oester/projects/ganomaly/data/breakhist_for_ganomaly
+multiprocessing-distributed: false

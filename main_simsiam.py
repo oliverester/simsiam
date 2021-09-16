@@ -5,7 +5,7 @@
 # This source code is licensed under the license found in the
 # LICENSE file in the root directory of this source tree.
 
-import argparse
+import configargparse
 import builtins
 import math
 import os
@@ -13,10 +13,11 @@ import random
 import shutil
 import time
 import warnings
+import datetime 
 
 import torch
 import torch.nn as nn
-import torch.nn.parallel
+import torch.nn.parallel 
 import torch.backends.cudnn as cudnn
 import torch.distributed as dist
 import torch.optim
@@ -26,6 +27,10 @@ import torch.utils.data.distributed
 import torchvision.transforms as transforms
 import torchvision.datasets as datasets
 import torchvision.models as models
+from torch.utils.tensorboard import SummaryWriter
+
+from tracking import MetricLogger
+import tracking 
 
 import simsiam.loader
 import simsiam.builder
@@ -34,8 +39,10 @@ model_names = sorted(name for name in models.__dict__
     if name.islower() and not name.startswith("__")
     and callable(models.__dict__[name]))
 
-parser = argparse.ArgumentParser(description='PyTorch ImageNet Training')
-parser.add_argument('-data', default='/home/oester/projects/up-detr/data/ILSVRC/Data/CLS-LOC',
+parser = configargparse.ArgumentParser(description='PyTorch ImageNet Training',
+                                       default_config_files=['config/exp_config.yml'])
+parser.add_argument('-c', '--config', default='config/exp_config.yml', help='path to config file', is_config_file=True)
+parser.add_argument('-d', '--data', default='/home/oester/projects/up-detr/data/ILSVRC/Data/CLS-LOC',
                     metavar='DIR', help='path to dataset')
 parser.add_argument('-a', '--arch', metavar='ARCH', default='resnet50',
                     choices=model_names,
@@ -48,7 +55,7 @@ parser.add_argument('--epochs', default=100, type=int, metavar='N',
                     help='number of total epochs to run')
 parser.add_argument('--start-epoch', default=0, type=int, metavar='N',
                     help='manual epoch number (useful on restarts)')
-parser.add_argument('-b', '--batch-size', default=512, type=int,
+parser.add_argument('-b', '--batch-size', default=64, type=int,
                     metavar='N',
                     help='mini-batch size (default: 512), this is the total '
                          'batch size of all GPUs on the current node when '
@@ -82,6 +89,9 @@ parser.add_argument('--multiprocessing-distributed', action='store_true',
                          'fastest way to use PyTorch for either single node or '
                          'multi node data parallel training')
 
+# logging
+parser.add_argument('--logdir', default='logdir', help='path to store logs.')
+
 # simsiam specific configs:
 parser.add_argument('--dim', default=2048, type=int,
                     help='feature dimension (default: 2048)')
@@ -93,6 +103,15 @@ parser.add_argument('--fix-pred-lr', action='store_true',
 def main():
     args = parser.parse_args()
 
+    model_name = f"simsiam_model" + '-{date:%Y-%m-%d_%H_%M_%S}'.format(date=datetime.datetime.now() )
+
+
+    # Writer will output to ./runs/ directory by default
+    from pathlib import Path
+    logdir = Path(args.logdir)
+    logdir.mkdir(parents=True, exist_ok=True)
+    logpath = logdir / model_name
+      
     if args.seed is not None:
         random.seed(args.seed)
         torch.manual_seed(args.seed)
@@ -112,26 +131,35 @@ def main():
 
     args.distributed = args.world_size > 1 or args.multiprocessing_distributed
 
-    ngpus_per_node = torch.cuda.device_count()
+    ngpus_per_node = 3 #torch.cuda.device_count()
     if args.multiprocessing_distributed:
         # Since we have ngpus_per_node processes per node, the total world_size
         # needs to be adjusted accordingly
         args.world_size = ngpus_per_node * args.world_size
         # Use torch.multiprocessing.spawn to launch distributed processes: the
         # main_worker process function
-        mp.spawn(main_worker, nprocs=ngpus_per_node, args=(ngpus_per_node, args))
+        mp.spawn(main_worker, nprocs=ngpus_per_node, args=(ngpus_per_node, args, logpath))
     else:
         # Simply call main_worker function
-        main_worker(args.gpu, ngpus_per_node, args)
+        main_worker(args.gpu, ngpus_per_node, args, logpath)
+    
 
-
-def main_worker(gpu, ngpus_per_node, args):
+def main_worker(gpu, ngpus_per_node, args, logpath):
+    
+    
     args.gpu = gpu
+    if args.gpu == 0:
+        writer = SummaryWriter(logpath)
+    else: 
+        writer = None
+
+    print(f"Hi I'm the process for GPU {gpu}")
 
     # suppress printing if not master
     if args.multiprocessing_distributed and args.gpu != 0:
         def print_pass(*args):
             pass
+        pass
         builtins.print = print_pass
 
     if args.gpu is not None:
@@ -191,8 +219,12 @@ def main_worker(gpu, ngpus_per_node, args):
     criterion = nn.CosineSimilarity(dim=1).cuda(args.gpu)
 
     if args.fix_pred_lr:
-        optim_params = [{'params': model.encoder.parameters(), 'fix_lr': False},
-                        {'params': model.predictor.parameters(), 'fix_lr': True}]
+        if args.distributed:
+            optim_params = [{'params': model.module.encoder.parameters(), 'fix_lr': False},
+                            {'params': model.module.predictor.parameters(), 'fix_lr': True}]
+        else: 
+            optim_params = [{'params': model.encoder.parameters(), 'fix_lr': False},
+                            {'params': model.predictor.parameters(), 'fix_lr': True}]
     else:
         optim_params = model.parameters()
 
@@ -247,9 +279,11 @@ def main_worker(gpu, ngpus_per_node, args):
     else:
         train_sampler = None
 
+    print(f"GPU {args.gpu} Train Data set length {len(train_dataset)}")
     train_loader = torch.utils.data.DataLoader(
         train_dataset, batch_size=args.batch_size, shuffle=(train_sampler is None),
         num_workers=args.workers, pin_memory=True, sampler=train_sampler, drop_last=True)
+
 
     for epoch in range(args.start_epoch, args.epochs):
         if args.distributed:
@@ -257,7 +291,7 @@ def main_worker(gpu, ngpus_per_node, args):
         adjust_learning_rate(optimizer, init_lr, epoch, args)
 
         # train for one epoch
-        train(train_loader, model, criterion, optimizer, epoch, args)
+        train(train_loader, model, criterion, optimizer, epoch, args, writer)
 
         if not args.multiprocessing_distributed or (args.multiprocessing_distributed
                 and args.rank % ngpus_per_node == 0):
@@ -267,24 +301,26 @@ def main_worker(gpu, ngpus_per_node, args):
                 'state_dict': model.state_dict(),
                 'optimizer' : optimizer.state_dict(),
             }, is_best=False, filename='checkpoint_{:04d}.pth.tar'.format(epoch))
+    
+    if args.gpu == 0:
+        writer.close()
 
 
-def train(train_loader, model, criterion, optimizer, epoch, args):
-    batch_time = AverageMeter('Time', ':6.3f')
-    data_time = AverageMeter('Data', ':6.3f')
-    losses = AverageMeter('Loss', ':.4f')
-    progress = ProgressMeter(
-        len(train_loader),
-        [batch_time, data_time, losses],
-        prefix="Epoch: [{}]".format(epoch))
+def train(train_loader, model, criterion, optimizer, epoch, args, writer):
+  
+    metric_logger = tracking.MetricLogger(delimiter="  ", tensorboard_writer=writer)
+    metric_logger.add_meter('loss', tracking.SmoothedValue(window_size=1, fmt='{avg:.6f}'))
+    metric_logger.add_meter('loss_t_5', tracking.SmoothedValue(window_size=5, fmt='{avg:.6f}'))
+
+    header = f'GPU {args.gpu} Epoch: [{epoch}]'
 
     # switch to train mode
     model.train()
 
     end = time.time()
-    for i, (images, _) in enumerate(train_loader):
+    for i, (images, _) in enumerate(metric_logger.log_every(train_loader, args.print_freq, epoch, header)):
+        #print(f"GPU {args.gpu} batch has {len(images[0])} images")
         # measure data loading time
-        data_time.update(time.time() - end)
 
         if args.gpu is not None:
             images[0] = images[0].cuda(args.gpu, non_blocking=True)
@@ -294,67 +330,23 @@ def train(train_loader, model, criterion, optimizer, epoch, args):
         p1, p2, z1, z2 = model(x1=images[0], x2=images[1])
         loss = -(criterion(p1, z2).mean() + criterion(p2, z1).mean()) * 0.5
 
-        losses.update(loss.item(), images[0].size(0))
-
         # compute gradient and do SGD step
         optimizer.zero_grad()
         loss.backward()
         optimizer.step()
-
-        # measure elapsed time
-        batch_time.update(time.time() - end)
-        end = time.time()
-
+        
         if i % args.print_freq == 0:
-            progress.display(i)
+            metric_logger.update(loss=loss.item(), loss_t_5=loss.item())
+            
+    # gather the stats from all processes
+    metric_logger.synchronize_between_processes()
+    print("Averaged stats:", metric_logger)
 
 
 def save_checkpoint(state, is_best, filename='checkpoint.pth.tar'):
     torch.save(state, filename)
     if is_best:
         shutil.copyfile(filename, 'model_best.pth.tar')
-
-
-class AverageMeter(object):
-    """Computes and stores the average and current value"""
-    def __init__(self, name, fmt=':f'):
-        self.name = name
-        self.fmt = fmt
-        self.reset()
-
-    def reset(self):
-        self.val = 0
-        self.avg = 0
-        self.sum = 0
-        self.count = 0
-
-    def update(self, val, n=1):
-        self.val = val
-        self.sum += val * n
-        self.count += n
-        self.avg = self.sum / self.count
-
-    def __str__(self):
-        fmtstr = '{name} {val' + self.fmt + '} ({avg' + self.fmt + '})'
-        return fmtstr.format(**self.__dict__)
-
-
-class ProgressMeter(object):
-    def __init__(self, num_batches, meters, prefix=""):
-        self.batch_fmtstr = self._get_batch_fmtstr(num_batches)
-        self.meters = meters
-        self.prefix = prefix
-
-    def display(self, batch):
-        entries = [self.prefix + self.batch_fmtstr.format(batch)]
-        entries += [str(meter) for meter in self.meters]
-        print('\t'.join(entries))
-
-    def _get_batch_fmtstr(self, num_batches):
-        num_digits = len(str(num_batches // 1))
-        fmt = '{:' + str(num_digits) + 'd}'
-        return '[' + fmt + '/' + fmt.format(num_batches) + ']'
-
 
 def adjust_learning_rate(optimizer, init_lr, epoch, args):
     """Decay the learning rate based on schedule"""

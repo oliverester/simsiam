@@ -6,7 +6,7 @@
     "configurations": [
 
         {
-            "name": "Python: Current File",
+            "name": "Python: main simsiam",
             "type": "python",
             "request": "launch",
             "program": "main_simsiam.py",
@@ -15,6 +15,7 @@
                 "--dist-url", "tcp://localhost:10001",
                 "--gpu", "0", "--world-size", "1", "--rank", "0",
                 "--fix-pred-lr",
+                "--batch-size", "63",
                 "-data", "/home/oester/projects/up-detr/data/ILSVRC/Data/CLS-LOC"]
         }
     ]

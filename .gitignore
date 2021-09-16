@@ -1,1 +1,4 @@
 simsiam/__pycache__/*
+logdir/*
+*.pyc
+
