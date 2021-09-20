@@ -8,3 +8,4 @@ scipy
 onnx
 onnxruntime
 configargparse
+apex

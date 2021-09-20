@@ -1,4 +1,5 @@
 simsiam/__pycache__/*
 logdir/*
 *.pyc
-
+checkpoints/*
+data/*

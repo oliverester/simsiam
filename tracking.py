@@ -3,48 +3,6 @@ import torch.distributed as dist
 import torch
 import time, datetime
 
-# class AverageMeter(object):
-#     """Computes and stores the average and current value"""
-#     def __init__(self, name, fmt=':f'):
-#         self.name = name
-#         self.fmt = fmt
-#         self.reset()
-
-#     def reset(self):
-#         self.val = 0
-#         self.avg = 0
-#         self.sum = 0
-#         self.count = 0
-#         self.wghtavg = 0
-
-#     def update(self, val, n=1):
-#         self.val = val
-#         self.sum += val * n
-#         self.count += n
-#         self.avg = self.sum / self.count
-#         self.wghtavg = self.wghtavg * .9 + val * .1 if n!=1 else val
-
-#     def __str__(self):
-#         fmtstr = '{name} {val' + self.fmt + '} ({avg' + self.fmt + '} / {wghtavg' + self.fmt + '})'
-#         return fmtstr.format(**self.__dict__)
-
-
-# class ProgressMeter(object):
-#     def __init__(self, num_batches, meters, prefix=""):
-#         self.batch_fmtstr = self._get_batch_fmtstr(num_batches)
-#         self.meters = meters
-#         self.prefix = prefix
-
-#     def display(self, batch):
-#         entries = [self.prefix + self.batch_fmtstr.format(batch)]
-#         entries += [str(meter) for meter in self.meters]
-#         print('\t'.join(entries))
-
-#     def _get_batch_fmtstr(self, num_batches):
-#         num_digits = len(str(num_batches // 1))
-#         fmt = '{:' + str(num_digits) + 'd}'
-#         return '[' + fmt + '/' + fmt.format(num_batches) + ']'
-
 
 class SmoothedValue(object):
     """Track a series of values and provide access to smoothed values over a
@@ -230,3 +188,85 @@ class MetricLogger(object):
         total_time_str = str(datetime.timedelta(seconds=int(total_time)))
         print('{} Total time: {} ({:.4f} s / it)'.format(
             header, total_time_str, total_time / len(iterable)))
+
+##
+class Visualizer():
+    """ Visualizer wrapper based on Tensorboard.
+
+    Returns:
+        Visualizer: Class file.
+    """
+    def __init__(self, writer):
+         self.writer = writer
+
+    def write_images(self,
+                     image_tensor, 
+                     label_tensor=None,
+                     tag=None,
+                     sample_size=None,
+                     epoch=None):
+        """Writes an image tensor to the current tensorboard run. Select sample size to draw samples from the tensor.
+        Args:
+            image_tensor ([type]): [description]
+            label_tensor ([type], optional): [description]. Defaults to None.
+            tag ([type], optional): [description]. Defaults to None.
+            sample ([type], optional): [description]. Defaults to None.
+        """
+        
+        if self.writer is None:
+            return
+        
+        batch_size = image_tensor.size(0)
+        
+        if sample_size is not None:
+            if sample_size > batch_size:
+                sample_size = batch_size
+            
+            perm = torch.randperm(batch_size)   
+            idx = perm[:sample_size]
+            image_samples = image_tensor[idx]
+        else:
+            image_samples = image_tensor
+        
+        self.writer.add_images(tag, image_samples, epoch)
+        
+        
+    def compare_images(self,
+                    image_tensor1,
+                    image_tensor2, 
+                    label_tensor=None,
+                    tag=None,
+                    sample_size=None,
+                    epoch=None):
+        """Compares two image tensors by writing to the current tensorboard run. Select sample size to draw samples from the tensor.
+        Args:
+            image_tensor ([type]): [description]
+            label_tensor ([type], optional): [description]. Defaults to None.
+            tag ([type], optional): [description]. Defaults to None.
+            sample ([type], optional): [description]. Defaults to None.
+        """
+        
+        if self.writer is None:
+            return
+        
+        batch_size = image_tensor1.size(0)
+        
+        if sample_size is not None:
+            if sample_size > batch_size:
+                sample_size = batch_size
+            
+            perm = torch.randperm(batch_size)   
+            idx = perm[:sample_size]
+            image_samples1 = image_tensor1[idx]
+            image_samples2 = image_tensor2[idx]
+        else:
+            image_samples1 = image_tensor1
+            image_samples2 = image_tensor2
+        
+        self.writer.add_images(tag + " Tensor 1", image_samples1, epoch)
+        self.writer.add_images(tag + " Tensor 2", image_samples2, epoch)
+
+
+def log_config(logpath, config_path):
+    from shutil import copy
+    copy(config_path, logpath)
