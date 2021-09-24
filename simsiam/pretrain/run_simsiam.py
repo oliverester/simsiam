@@ -10,7 +10,6 @@ import math
 import os
 import random
 import shutil
-import time
 import warnings
 import datetime 
 
@@ -23,15 +22,15 @@ import torch.optim
 import torch.multiprocessing as mp
 import torch.utils.data
 import torch.utils.data.distributed
-import torchvision.transforms as transforms
-import torchvision.datasets as datasets
+
 from torch.utils.tensorboard import SummaryWriter
 
-from tracking import MetricLogger, Visualizer
+from tracking import Visualizer
 import tracking 
 
 import simsiam.loader
 import simsiam.builder
+from simsiam.data_provider import DataProvider
 from simsiam.pretrain.simsiam_parser import simsiam_parse_config
 
 import torchvision.models as models
@@ -198,39 +197,9 @@ def main_worker(gpu, ngpus_per_node, args, logpath):
 
     cudnn.benchmark = True
 
-    # Data loading code
-    traindir = args.train_data
-    normalize = transforms.Normalize(mean=[0.485, 0.456, 0.406],
-                                     std=[0.229, 0.224, 0.225])
-
-    # MoCo v2's aug: similar to SimCLR https://arxiv.org/abs/2002.05709
-    augmentation = [
-        transforms.RandomResizedCrop(224, scale=(0.2, 1.)),
-        transforms.RandomApply([
-            transforms.ColorJitter(0.4, 0.4, 0.4, 0.1)  # not strengthened
-        ], p=0.8),
-        transforms.RandomGrayscale(p=0.2),
-        transforms.RandomApply([simsiam.loader.GaussianBlur([.1, 2.])], p=0.5),
-        transforms.RandomHorizontalFlip(),
-        transforms.ToTensor(),
-        normalize
-    ]
-
-    train_dataset = datasets.ImageFolder(
-        traindir,
-        simsiam.loader.TwoCropsTransform(transforms.Compose(augmentation)))
-
-    if args.distributed:
-        train_sampler = torch.utils.data.distributed.DistributedSampler(train_dataset)
-    else:
-        train_sampler = None
-
-    print(f"GPU {args.gpu} Train Data set length {len(train_dataset)}")
-    train_loader = torch.utils.data.DataLoader(
-        train_dataset, batch_size=args.batch_size, shuffle=(train_sampler is None),
-        num_workers=args.workers, pin_memory=True, sampler=train_sampler, drop_last=True)
-
-
+    data_provider = DataProvider(args=args)
+    train_loader, train_sampler = data_provider.get_train_loader()
+    
     for epoch in range(args.start_epoch, args.epochs):
         if args.distributed:
             train_sampler.set_epoch(epoch)
@@ -255,8 +224,8 @@ def main_worker(gpu, ngpus_per_node, args, logpath):
 def train(train_loader, model, criterion, optimizer, epoch, args, writer, visualizer: Visualizer):
   
     metric_logger = tracking.MetricLogger(delimiter="  ", tensorboard_writer=writer)
-    metric_logger.add_meter('loss', tracking.SmoothedValue(window_size=1, fmt='{avg:.6f}'))
-    metric_logger.add_meter('loss_t_5', tracking.SmoothedValue(window_size=5, fmt='{avg:.6f}'))
+    metric_logger.add_meter('loss', tracking.SmoothedValue(window_size=1, type='avg'))
+    metric_logger.add_meter('loss_t_5', tracking.SmoothedValue(window_size=5, type='avg'))
 
     header = f'GPU {args.gpu} Epoch: [{epoch}]'
 

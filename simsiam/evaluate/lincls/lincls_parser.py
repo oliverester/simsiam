@@ -7,7 +7,7 @@ model_names = sorted(name for name in models.__dict__
     and callable(models.__dict__[name]))
 
 
-def tnse_parse_config(config_path=None, 
+def lincls_parse_config(config_path=None, 
                         verbose=False):
         
     parser = configargparse.ArgumentParser(description='PyTorch ImageNet Training',
@@ -32,6 +32,17 @@ def tnse_parse_config(config_path=None,
                         help='mini-batch size (default: 4096), this is the total '
                             'batch size of all GPUs on the current node when '
                             'using Data Parallel or Distributed Data Parallel')
+    parser.add_argument('--lr', '--learning-rate', default=0.1, type=float,
+                        metavar='LR', help='initial (base) learning rate', dest='lr')
+    parser.add_argument('--momentum', default=0.9, type=float, metavar='M',
+                        help='momentum')
+    parser.add_argument('--wd', '--weight-decay', default=0., type=float,
+                        metavar='W', help='weight decay (default: 0.)',
+                        dest='weight_decay')
+    parser.add_argument('-p', '--print-freq', default=10, type=int,
+                        metavar='N', help='print frequency (default: 10)')
+    parser.add_argument('--resume', default='', type=str, metavar='PATH',
+                        help='path to latest checkpoint (default: none)')
     parser.add_argument('-e', '--evaluate', dest='evaluate', action='store_true',
                         help='evaluate model on validation set')
     parser.add_argument('--world-size', default=-1, type=int,
@@ -46,6 +57,8 @@ def tnse_parse_config(config_path=None,
                         help='seed for initializing training. ')
     parser.add_argument('--gpu', default=None, type=int,
                         help='GPU id to use.')
+    parser.add_argument('--ngpus', default=None, type=int,
+                        help='number of GPUs to use.')
     parser.add_argument('--multiprocessing-distributed', action='store_true',
                         help='Use multi-processing distributed training to launch '
                             'N processes per node, which has N GPUs. This is the '
@@ -54,12 +67,12 @@ def tnse_parse_config(config_path=None,
 
     # additional configs:
     parser.add_argument('--model-path', default='', type=str,
-                        help='path to simsiam model path')
+                        help='path to simsiam model folder')
     parser.add_argument('--checkpoint', default='', type=str,
-                        help='checkpoint filename')
-    parser.add_argument('--dim', default=2048, type=int,
-                        help='feature dimension (default: 2048)')
-    
+                        help='filename of checkpoint in model folder')
+    parser.add_argument('--lars', action='store_true',
+                        help='Use LARS')
+
     args = parser.parse_args()
     
     if verbose:

@@ -3,5 +3,5 @@ gpu: 0
 train-data: /home/oester/projects/simsiam/data/breakhist_for_simsiam/train
 test-data: /home/oester/projects/simsiam/data/breakhist_for_simsiam/test
 model-path: logdir/simsiam_model-2021-09-20_12_34_58
-check-point: checkpoint_0099.pth.tar
+checkpoint: checkpoint_0099.pth.tar
 k: 5

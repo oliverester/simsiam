@@ -6,6 +6,7 @@
 # LICENSE file in the root directory of this source tree.
 
 
+from simsiam.data_provider import DataProvider
 import numpy as np
 import os
 import random
@@ -26,7 +27,7 @@ import torchvision.models as models
 
 from sklearn.manifold import TSNE
 from matplotlib import pyplot as plt
-from evaluate.tsne.tsne_parser import tnse_parse_config
+from simsiam.evaluate.tsne.tsne_parser import tnse_parse_config
 import simsiam.builder
 import tracking
 
@@ -34,15 +35,12 @@ model_names = sorted(name for name in models.__dict__
     if name.islower() and not name.startswith("__")
     and callable(models.__dict__[name]))
 
-
 def run_tsne(config_path):
     args = tnse_parse_config(config_path=config_path,
                                verbose=True)
-
+    
     tracking.log_config(args.model_path, config_path)
-     
-    args.pretrained = os.path.join(args.model_path, args.checkpoint)
-
+      
     if args.seed is not None:
         random.seed(args.seed)
         torch.manual_seed(args.seed)
@@ -62,15 +60,7 @@ def run_tsne(config_path):
 
 
 def main_worker(gpu,args):
-    """
-    KNN classifier establishes a "model" by determine the training-embeddings.
-    We also need the true classes for these samples (might also work for semi-supervised)
-    Eval-embeddings are then matched via KNN.
-
-    Args:
-        gpu ([type]): [description]
-        args ([type]): [description]
-    """
+    
     args.gpu = gpu
     args.device = 'cuda'
     
@@ -87,6 +77,8 @@ def main_worker(gpu,args):
                                     inference=True)
 
     # load from pre-trained, before DistributedDataParallel constructor
+
+    args.pretrained = os.path.join(args.model_path, args.checkpoint)
     if args.pretrained:
         if os.path.isfile(args.pretrained):
             print("=> loading checkpoint '{}'".format(args.pretrained))
@@ -110,7 +102,7 @@ def main_worker(gpu,args):
 
             print("=> loaded pre-trained model '{}'".format(args.pretrained))
         else:
-            print("=> no checkpoint found at '{}'".format(args.pretrained))
+            raise Exception("=> no checkpoint found at '{}'".format(args.pretrained))
 
     model.cuda(args.gpu)
 
@@ -118,65 +110,88 @@ def main_worker(gpu,args):
     cudnn.benchmark = True
 
     # Data loading code
-    traindir = os.path.join(args.train_data)
-    
-    normalize = transforms.Normalize(mean=[0.485, 0.456, 0.406],
-                                     std=[0.229, 0.224, 0.225])
-
-    val_loader = torch.utils.data.DataLoader(
-        datasets.ImageFolder(traindir, transforms.Compose([
-            transforms.Resize(256),
-            transforms.CenterCrop(224),
-            transforms.ToTensor(),
-            normalize,
-        ])),
-        batch_size=int(args.batch_size), shuffle=False,
-        num_workers=args.workers, pin_memory=True)
+    data_provider = DataProvider(args=args)
+    val_loader = data_provider.get_val_loader()
 
     embeddings, labels = get_embeddings(val_loader, model, args)
-    
-    knn_model = build_knn_model(embeddings, labels, k=5)
-    
-     # Data loading code
-    testdir = os.path.join(args.test_data)
-    
-    normalize = transforms.Normalize(mean=[0.485, 0.456, 0.406],
-                                     std=[0.229, 0.224, 0.225])
-
-    test_loader = torch.utils.data.DataLoader(
-        datasets.ImageFolder(testdir, transforms.Compose([
-            transforms.Resize(256),
-            transforms.CenterCrop(224),
-            transforms.ToTensor(),
-            normalize,
-        ])),
-        batch_size=int(args.batch_size), shuffle=False,
-        num_workers=args.workers, pin_memory=True)
-
-    test_embeddings, labels = get_embeddings(test_loader, model, args)
-    
-    # predict class for test embeddings unsing knnn model
-    #accuary = ..
+    visualize_tsne(embeddings=embeddings, 
+                   save_to=os.path.join(args.model_path, 'tnse_plot.jpg'), 
+                   labels=labels)
     
 
-def build_knn_model(embeddings, labels, k=5):
-    pass
+def visualize_tsne(embeddings, save_to, labels=None, colors_per_class=None):
+    
+    if colors_per_class is None:
+        colors_per_class = {0: [[1, 0.5, 0.5]],
+                            1: [[0.5, 1, 1]]}
+    if labels is None:
+        labels = np.array([0]*len(embeddings))
+    
+    tsne = TSNE(n_components=2).fit_transform(embeddings)
+         
+    # extract x and y coordinates representing the positions of the images on T-SNE plot
+    tx = tsne[:, 0]
+    ty = tsne[:, 1]
+
+    tx = scale_to_01_range(tx)
+    ty = scale_to_01_range(ty)
+        
+        # initialize a matplotlib plot
+    fig = plt.figure()
+    ax = fig.add_subplot(111)
+
+    # for every class, we'll add a scatter plot separately
+    for label in colors_per_class:
+        # find the samples of the current class in the data
+        indices = [i for i, l in enumerate(labels) if l == label]
+
+        # extract the coordinates of the points of this class only
+        current_tx = np.take(tx, indices)
+        current_ty = np.take(ty, indices)
+
+        # convert the class color to matplotlib format
+        color = colors_per_class[label]
+
+        # add a scatter plot with the corresponding color and label
+        ax.scatter(current_tx, current_ty, c=color, label=label)
+
+    # build a legend using the labels we set previously
+    ax.legend(loc='best')
+
+    # finally, show the plot
+    print(f"Saving tnse result to {save_to}")
+    plt.savefig(save_to)
+
+    # scale and move the coordinates so they fit [0; 1] range
+def scale_to_01_range(x):
+    # compute the distribution range
+    value_range = (np.max(x) - np.min(x))
+
+    # move the distribution so that it starts from zero
+    # by extracting the minimal value from all its values
+    starts_from_zero = x - np.min(x)
+
+    # make the distribution fit [0; 1] by dividing by its range
+    return starts_from_zero / value_range
 
 
 def get_embeddings(val_loader, model, args):
    
+    print("Determine tsne embeddings...")
     embeddings = torch.zeros(size=(len(val_loader.dataset), args.dim), dtype=torch.float32, device=args.device)
     labels = torch.zeros(size=(len(val_loader.dataset),), dtype=torch.int, device=args.device)
     # switch to evaluate mode
     model.eval()
 
     with torch.no_grad():
+        pointer = 0
         for i, (images, targets) in enumerate(val_loader):
             if args.gpu is not None:
                 images = images.cuda(args.gpu, non_blocking=True)
             # compute output
             output = model(images)
-            embeddings[i*int(args.batch_size) : i*int(args.batch_size)+images.size(0)] = output
-            labels[i*int(args.batch_size) : i*int(args.batch_size)+images.size(0)] = targets
+            embeddings[pointer:pointer+images.size(0)] = output
+            labels[pointer:pointer+images.size(0)] = targets
+            pointer += images.size(0)
 
     return embeddings.cpu().numpy(), labels.cpu().numpy()

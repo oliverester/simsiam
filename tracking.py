@@ -10,13 +10,12 @@ class SmoothedValue(object):
     @ heavily adapted from up-detr  
     """
 
-    def __init__(self, window_size=20, fmt=None, to_tensorboard=True):
-        if fmt is None:
-            fmt = "{median:.4f} ({global_avg:.4f})"
+    def __init__(self, window_size=20, to_tensorboard=True, type='avg'):
+       
         self.deque = deque(maxlen=window_size)
         self.total = 0.0
         self.count = 0
-        self.fmt = fmt
+        self.type = type
         self.to_tensorboard = to_tensorboard
 
     def update(self, value, n=1):
@@ -59,14 +58,19 @@ class SmoothedValue(object):
     @property
     def value(self):
         return self.deque[-1]
-
+    
+    @property
+    def log(self):
+         return round(getattr(self, self.type),2)
+    
     def __str__(self):
-        return self.fmt.format(
-            median=self.median,
-            avg=self.avg,
-            global_avg=self.global_avg,
-            max=self.max,
-            value=self.value)
+        return f"{self.type}: {round(getattr(self, self.type),2)}"
+        # return self.fmt.format(
+        #     median=self.median,
+        #     avg=self.avg,
+        #     global_avg=self.global_avg,
+        #     max=self.max,
+        #     value=self.value)
 
 
 def is_dist_avail_and_initialized():
@@ -91,8 +95,16 @@ class MetricLogger(object):
         for k, v in kwargs.items():
             if isinstance(v, torch.Tensor):
                 v = v.item()
-            assert isinstance(v, (float, int))
-            self.meters[k].update(v)
+            assert isinstance(v, (float, int, tuple))
+            # if tuple - 2nd elment is count value
+            if isinstance(v, tuple):
+                assert(len(v) == 2)
+                if isinstance(v[0], torch.Tensor):
+                    v = list(v)
+                    v[0] = v[0].item()
+                self.meters[k].update(v[0], v[1])
+            else:    
+                self.meters[k].update(v)
 
     def __getattr__(self, attr):
         if attr in self.meters:
@@ -126,9 +138,9 @@ class MetricLogger(object):
         if self.tensorboard_writer is None:
             Warning("No tensorboard writer attached to MetricLogger")
             return
-        for name, value in self.meters.items():
+        for name, meter in self.meters.items():
             self.tensorboard_writer.add_scalar(tag=name, 
-                                    scalar_value=value.avg, 
+                                    scalar_value=meter.log, 
                                     global_step=step)
 
         
@@ -138,8 +150,8 @@ class MetricLogger(object):
             header = ''
         start_time = time.time()
         end = time.time()
-        iter_time = SmoothedValue(fmt='{avg:.4f}')
-        data_time = SmoothedValue(fmt='{avg:.4f}')
+        iter_time = SmoothedValue(type='avg')
+        data_time = SmoothedValue(type='avg')
         space_fmt = ':' + str(len(str(len(iterable)))) + 'd'
         if torch.cuda.is_available():
             log_msg = self.delimiter.join([

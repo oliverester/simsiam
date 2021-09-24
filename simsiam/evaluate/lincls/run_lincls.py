@@ -11,6 +11,7 @@ import math
 import os
 import random
 import shutil
+from simsiam.data_provider import DataProvider
 import time
 import warnings
 
@@ -23,11 +24,15 @@ import torch.optim
 import torch.multiprocessing as mp
 import torch.utils.data
 import torch.utils.data.distributed
+
+from torch.utils.tensorboard import SummaryWriter
+
 import torchvision.transforms as transforms
 import torchvision.datasets as datasets
 import torchvision.models as models
 
-from evaluate.lincls.lincls_parser import lincls_parse_config
+import tracking
+from simsiam.evaluate.lincls.lincls_parser import lincls_parse_config
 
 model_names = sorted(name for name in models.__dict__
     if name.islower() and not name.startswith("__")
@@ -39,6 +44,9 @@ best_acc1 = 0
 def run_lincls(config_path):
     args = lincls_parse_config(config_path=config_path,
                                verbose=True)
+
+    tracking.log_config(args.model_path, config_path) 
+    args.pretrained = os.path.join(args.model_path, args.checkpoint)
 
     if args.seed is not None:
         random.seed(args.seed)
@@ -59,7 +67,7 @@ def run_lincls(config_path):
 
     args.distributed = args.world_size > 1 or args.multiprocessing_distributed
 
-    ngpus_per_node = 3 #torch.cuda.device_count()
+    ngpus_per_node = args.ngpus #torch.cuda.device_count()
     if args.multiprocessing_distributed:
         # Since we have ngpus_per_node processes per node, the total world_size
         # needs to be adjusted accordingly
@@ -75,6 +83,11 @@ def run_lincls(config_path):
 def main_worker(gpu, ngpus_per_node, args):
     global best_acc1
     args.gpu = gpu
+    
+    if args.gpu == 0:
+        writer = SummaryWriter(args.model_path)
+    else: 
+        writer = None
 
     # suppress printing if not master
     if args.multiprocessing_distributed and args.gpu != 0:
@@ -204,39 +217,11 @@ def main_worker(gpu, ngpus_per_node, args):
     cudnn.benchmark = True
 
     # Data loading code
-    traindir = os.path.join(args.data, 'train')
-    valdir = os.path.join(args.data, 'test')
-    normalize = transforms.Normalize(mean=[0.485, 0.456, 0.406],
-                                     std=[0.229, 0.224, 0.225])
-
-    train_dataset = datasets.ImageFolder(
-        traindir,
-        transforms.Compose([
-            transforms.RandomResizedCrop(224),
-            transforms.RandomHorizontalFlip(),
-            transforms.ToTensor(),
-            normalize,
-        ]))
-
-    if args.distributed:
-        train_sampler = torch.utils.data.distributed.DistributedSampler(train_dataset)
-    else:
-        train_sampler = None
-
-    train_loader = torch.utils.data.DataLoader(
-        train_dataset, batch_size=args.batch_size, shuffle=(train_sampler is None),
-        num_workers=args.workers, pin_memory=True, sampler=train_sampler)
-
-    val_loader = torch.utils.data.DataLoader(
-        datasets.ImageFolder(valdir, transforms.Compose([
-            transforms.Resize(256),
-            transforms.CenterCrop(224),
-            transforms.ToTensor(),
-            normalize,
-        ])),
-        batch_size=256, shuffle=False,
-        num_workers=args.workers, pin_memory=True)
-
+    data_provider = DataProvider(args=args)
+    train_loader, train_sampler = data_provider.get_train_loader(aug=False)
+    
+    val_loader = data_provider.get_val_loader()
+   
     if args.evaluate:
         validate(val_loader, model, criterion, args)
         return
@@ -247,10 +232,11 @@ def main_worker(gpu, ngpus_per_node, args):
         adjust_learning_rate(optimizer, init_lr, epoch, args)
 
         # train for one epoch
-        train(train_loader, model, criterion, optimizer, epoch, args)
+        train(train_loader, model, criterion, optimizer, epoch, args, writer)
 
         # evaluate on validation set
-        acc1 = validate(val_loader, model, criterion, args)
+        acc1 = validate(val_loader, model, criterion, args, epoch, writer)
+
 
         # remember best acc@1 and save checkpoint
         is_best = acc1 > best_acc1
@@ -258,18 +244,27 @@ def main_worker(gpu, ngpus_per_node, args):
 
         if not args.multiprocessing_distributed or (args.multiprocessing_distributed
                 and args.rank % ngpus_per_node == 0):
+            
             save_checkpoint({
                 'epoch': epoch + 1,
                 'arch': args.arch,
                 'state_dict': model.state_dict(),
                 'best_acc1': best_acc1,
                 'optimizer' : optimizer.state_dict(),
-            }, is_best)
+            }, is_best, args=args)
             if epoch == args.start_epoch:
                 sanity_check(model.state_dict(), args.pretrained)
 
 
-def train(train_loader, model, criterion, optimizer, epoch, args):
+def train(train_loader, model, criterion, optimizer, epoch, args, writer):
+    
+    metric_logger = tracking.MetricLogger(delimiter="  ", tensorboard_writer=writer)
+    metric_logger.add_meter('loss', tracking.SmoothedValue(window_size=1, type='avg'))
+    metric_logger.add_meter('acc1', tracking.SmoothedValue(window_size=1, type='avg'))
+    metric_logger.add_meter('acc5', tracking.SmoothedValue(window_size=1, type='avg'))
+
+    header = f'GPU {args.gpu} Epoch: [{epoch}]'
+
     batch_time = AverageMeter('Time', ':6.3f')
     data_time = AverageMeter('Data', ':6.3f')
     losses = AverageMeter('Loss', ':.4e')
@@ -290,7 +285,8 @@ def train(train_loader, model, criterion, optimizer, epoch, args):
     model.eval()
 
     end = time.time()
-    for i, (images, target) in enumerate(train_loader):
+    
+    for i, (images, target) in  enumerate(metric_logger.log_every(train_loader, args.print_freq, epoch, header)):
         # measure data loading time
         data_time.update(time.time() - end)
 
@@ -307,7 +303,7 @@ def train(train_loader, model, criterion, optimizer, epoch, args):
         losses.update(loss.item(), images.size(0))
         top1.update(acc1[0], images.size(0))
         top5.update(acc5[0], images.size(0))
-
+    
         # compute gradient and do SGD step
         optimizer.zero_grad()
         loss.backward()
@@ -319,9 +315,12 @@ def train(train_loader, model, criterion, optimizer, epoch, args):
 
         if i % args.print_freq == 0:
             progress.display(i)
+            metric_logger.update(acc1=acc1[0], acc5=acc5[0])
+            metric_logger.update(loss=loss.item())
+        
 
 
-def validate(val_loader, model, criterion, args):
+def validate(val_loader, model, criterion, args, epoch, writer):
     batch_time = AverageMeter('Time', ':6.3f')
     losses = AverageMeter('Loss', ':.4e')
     top1 = AverageMeter('Acc@1', ':6.2f')
@@ -333,6 +332,10 @@ def validate(val_loader, model, criterion, args):
 
     # switch to evaluate mode
     model.eval()
+    
+    metric_logger = tracking.MetricLogger(delimiter="  ", tensorboard_writer=writer)
+    metric_logger.add_meter('val_acc1', tracking.SmoothedValue(window_size=1, type='global_avg'))
+    metric_logger.add_meter('val_acc5', tracking.SmoothedValue(window_size=1, type='global_avg'))
 
     with torch.no_grad():
         end = time.time()
@@ -351,6 +354,9 @@ def validate(val_loader, model, criterion, args):
             top1.update(acc1[0], images.size(0))
             top5.update(acc5[0], images.size(0))
 
+            metric_logger.update(val_acc1=(acc1[0], images.size(0)),
+                                 val_acc5=(acc5[0], images.size(0)))
+
             # measure elapsed time
             batch_time.update(time.time() - end)
             end = time.time()
@@ -362,13 +368,15 @@ def validate(val_loader, model, criterion, args):
         print(' * Acc@1 {top1.avg:.3f} Acc@5 {top5.avg:.3f}'
               .format(top1=top1, top5=top5))
 
+        metric_logger.send_meters_to_tensorboard(epoch)
     return top1.avg
 
 
-def save_checkpoint(state, is_best, filename='checkpoint.pth.tar'):
-    torch.save(state, filename)
+def save_checkpoint(state, is_best, args, filename='checkpoint.pth.tar'):
+    torch.save(state, os.path.join(args.model_path, filename))
     if is_best:
-        shutil.copyfile(filename, 'model_best.pth.tar')
+        shutil.copyfile(os.path.join(args.model_path, filename), 
+                        os.path.join(args.model_path, 'model_best.pth.tar'))
 
 
 def sanity_check(state_dict, pretrained_weights):
@@ -458,7 +466,3 @@ def accuracy(output, target, topk=(1,)):
             correct_k = correct[:k].reshape(-1).float().sum(0, keepdim=True)
             res.append(correct_k.mul_(100.0 / batch_size))
         return res
-
-
-if __name__ == '__main__':
-    main(config_path='config/lincls_config.yml')
