@@ -5,7 +5,8 @@
 # This source code is licensed under the license found in the
 # LICENSE file in the root directory of this source tree.
 
-
+from simsiam.evaluate.eval_utils import get_embeddings
+from simsiam.pretrain.load_pretrained_model import load_pretrained_model
 from simsiam.data_provider import DataProvider
 import numpy as np
 import os
@@ -13,22 +14,16 @@ import random
 import warnings
 
 import torch
-import torch.nn as nn
 import torch.nn.parallel
 import torch.backends.cudnn as cudnn
-import torch.distributed as dist
 import torch.optim
-import torch.multiprocessing as mp
 import torch.utils.data
 import torch.utils.data.distributed
-import torchvision.transforms as transforms
-import torchvision.datasets as datasets
 import torchvision.models as models
 
 from sklearn.manifold import TSNE
 from matplotlib import pyplot as plt
 from simsiam.evaluate.tsne.tsne_parser import tnse_parse_config
-import simsiam.builder
 import tracking
 
 model_names = sorted(name for name in models.__dict__
@@ -69,43 +64,8 @@ def main_worker(gpu,args):
     if args.gpu is not None:
         print("Use GPU: {} for training".format(args.gpu))
 
-    # create model
-    print("=> creating model '{}'".format(args.arch))
-    # get model but without predictor (we want the features)
-    model = simsiam.builder.SimSiam(models.__dict__[args.arch],
-                                    args.dim,
-                                    inference=True)
-
-    # load from pre-trained, before DistributedDataParallel constructor
-
-    args.pretrained = os.path.join(args.model_path, args.checkpoint)
-    if args.pretrained:
-        if os.path.isfile(args.pretrained):
-            print("=> loading checkpoint '{}'".format(args.pretrained))
-            checkpoint = torch.load(args.pretrained, map_location="cpu")
-
-            # rename moco pre-trained keys
-            state_dict = checkpoint['state_dict']
-            for k in list(state_dict.keys()):
-                # retain only encoder up to before the embedding layer
-                if k.startswith('module.encoder'): # and not k.startswith('module.encoder.fc'):
-                    # remove prefix
-                    state_dict[k[len("module."):]] = state_dict[k]
-                else:
-                    print(f"Remove layer {k}")
-                # delete renamed or unused k
-                del state_dict[k]
-
-            args.start_epoch = 0
-            msg = model.load_state_dict(state_dict, strict=False)
-            assert set(msg.missing_keys) == set([])
-
-            print("=> loaded pre-trained model '{}'".format(args.pretrained))
-        else:
-            raise Exception("=> no checkpoint found at '{}'".format(args.pretrained))
-
-    model.cuda(args.gpu)
-
+    model = load_pretrained_model(args)
+    
     print(model)
     cudnn.benchmark = True
 
@@ -173,25 +133,3 @@ def scale_to_01_range(x):
 
     # make the distribution fit [0; 1] by dividing by its range
     return starts_from_zero / value_range
-
-
-def get_embeddings(val_loader, model, args):
-   
-    print("Determine tsne embeddings...")
-    embeddings = torch.zeros(size=(len(val_loader.dataset), args.dim), dtype=torch.float32, device=args.device)
-    labels = torch.zeros(size=(len(val_loader.dataset),), dtype=torch.int, device=args.device)
-    # switch to evaluate mode
-    model.eval()
-
-    with torch.no_grad():
-        pointer = 0
-        for i, (images, targets) in enumerate(val_loader):
-            if args.gpu is not None:
-                images = images.cuda(args.gpu, non_blocking=True)
-            # compute output
-            output = model(images)
-            embeddings[pointer:pointer+images.size(0)] = output
-            labels[pointer:pointer+images.size(0)] = targets
-            pointer += images.size(0)
-
-    return embeddings.cpu().numpy(), labels.cpu().numpy()
