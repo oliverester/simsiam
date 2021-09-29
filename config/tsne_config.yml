@@ -1,5 +1,5 @@
 a: resnet50
 gpu: 0
-test-data: /home/oester/projects/simsiam/data/breakhist_for_simsiam/test
-model-path: logdir/simsiam_model-2021-09-20_12_34_58
-checkpoint: checkpoint_0099.pth.tar
+test-data: /home/oester/projects/simsiam/data/camelyon16_test/test
+model-path: logdir/simsiam_model-2021-09-28_13_35_25
+checkpoint: checkpoint_0009.pth.tar

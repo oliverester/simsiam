@@ -227,6 +227,7 @@ def train(train_loader, model, criterion, optimizer, epoch, args, writer, visual
     metric_logger.add_meter('loss', tracking.SmoothedValue(window_size=1, type='avg'))
     metric_logger.add_meter('loss_t_5', tracking.SmoothedValue(window_size=5, type='avg'))
 
+    
     header = f'GPU {args.gpu} Epoch: [{epoch}]'
 
     # switch to train mode

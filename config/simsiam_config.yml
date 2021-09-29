@@ -1,9 +1,11 @@
 a: resnet50
 dist-url: tcp://localhost:10001
 ngpus: 2
+workers: 16
 world-size: 1 
 rank: 0 
 fix-pred-lr: true
 batch-size: 512
-train-data: /home/oester/projects/simsiam/data/breakhist_for_simsiam/train
+epochs: 10
+train-data: /home/oester/projects/simsiam/data/camelyon16/train
 multiprocessing-distributed: true

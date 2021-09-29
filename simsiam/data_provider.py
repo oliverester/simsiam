@@ -1,9 +1,11 @@
+from custom_datasets.patch.PatchFromFile import PatchFromFile
 import torch
 import torchvision.transforms as transforms
 import torchvision.datasets as datasets
-
 import simsiam
 import simsiam.loader
+from custom_datasets.CustomPatchesDataset import CustomPatchesDataset
+from custom_datasets.wsi_dataset.WSIDatasetFolder import WSIDatasetFolder
 
 class DataProvider():
     
@@ -40,10 +42,13 @@ class DataProvider():
         
         # MoCo v2's aug: similar to SimCLR https://arxiv.org/abs/2002.05709
         
-        train_dataset = datasets.ImageFolder(
-            traindir,
-            self.aug_transform if aug else self.non_aug_transform)
+        #train_dataset = datasets.ImageFolder(
+        #     traindir,
+        #     self.aug_transform if aug else self.non_aug_transform)
 
+        train_dataset = CustomPatchesDataset(wsi_dataset=WSIDatasetFolder(root_folder=traindir), 
+                                             transform=self.aug_transform if aug else self.non_aug_transform)
+        
         if 'distributed' in self.args and self.args.distributed:
             train_sampler = torch.utils.data.distributed.DistributedSampler(train_dataset)
         else:

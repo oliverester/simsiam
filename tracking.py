@@ -145,6 +145,9 @@ class MetricLogger(object):
 
         
     def log_every(self, iterable, print_freq, epoch=None, header=None):
+        
+        self.add_meter('total_time', SmoothedValue(window_size=1, type='avg'))
+
         i = 0
         if not header:
             header = ''
@@ -193,6 +196,7 @@ class MetricLogger(object):
                         time=str(iter_time), data=str(data_time)))
                     
                 # send meters to tensorboard
+                self.update(total_time=time.time() - start_time)
                 self.send_meters_to_tensorboard(step=epoch+i/len(iterable))
             i += 1
             end = time.time()
@@ -200,6 +204,9 @@ class MetricLogger(object):
         total_time_str = str(datetime.timedelta(seconds=int(total_time)))
         print('{} Total time: {} ({:.4f} s / it)'.format(
             header, total_time_str, total_time / len(iterable)))
+        self.update(total_time=total_time)
+         # send meters to tensorboard
+        self.send_meters_to_tensorboard(step=epoch)
 
 ##
 class Visualizer():
