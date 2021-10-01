@@ -8,6 +8,7 @@
 import builtins
 import math
 import os
+from pathlib import Path
 import random
 import shutil
 import warnings
@@ -39,6 +40,7 @@ model_names = sorted(name for name in models.__dict__
     if name.islower() and not name.startswith("__")
     and callable(models.__dict__[name]))
 
+SIMSIAM_LOG_DIR = Path('logdir/simsiam')
 
 def run_simsiam(config_path):
     args = simsiam_parse_config(config_path=config_path,
@@ -46,11 +48,8 @@ def run_simsiam(config_path):
     
     model_name = f"simsiam_model" + '-{date:%Y-%m-%d_%H_%M_%S}'.format(date=datetime.datetime.now() )
 
-
     # Writer will output to ./runs/ directory by default
-    from pathlib import Path
-    logdir = Path(args.logdir)
-    logpath = logdir / model_name
+    logpath = SIMSIAM_LOG_DIR / model_name
     logpath.mkdir(parents=True, exist_ok=True)
     
     tracking.log_config(logpath, config_path)
@@ -88,7 +87,6 @@ def run_simsiam(config_path):
     
 
 def main_worker(gpu, ngpus_per_node, args, logpath):
-    
     
     args.gpu = gpu
     if args.gpu == 0:

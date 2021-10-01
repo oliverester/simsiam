@@ -1,10 +1,13 @@
 import os
-import simsiam
+import simsiam.builder
 import torch 
 import torchvision.models as models
 
 def load_pretrained_model(args):
     
+    args.device = 'cuda'
+    torch.cuda.set_device(args.gpu)
+
     print("=> creating model '{}'".format(args.arch))
     
     # get model but without predictor (we want the features)

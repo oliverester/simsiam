@@ -1,19 +1,23 @@
 from pathlib import Path
+from custom_datasets.LabelHandler import LabelHandler
 from custom_datasets.patch.Patch import Patch
 from PIL import Image
 
 class PatchFromFile(Patch):
     
-    def __init__(self, file_path: str) -> None:
-        self.file_path = file_path
+    def __init__(self, 
+                 file_path: str,
+                 label_handler: LabelHandler) -> None:
         
-        self.x, self.y, self.label = self._parse_file(self.file_path)
+        self.file_path = file_path
+        self.x, self.y, self.org_label = self._parse_file(self.file_path)
+        self.label = label_handler.encode(self.org_label)
         
     def _parse_file(self, file_path: str):
         basename = Path(file_path).stem
         name_parts = basename.split('_')
-        x = name_parts[-3]
-        y = name_parts[-2]
+        x = int(name_parts[-2])
+        y = int(name_parts[-3])
         label = name_parts[-1]
         
         return x, y, label

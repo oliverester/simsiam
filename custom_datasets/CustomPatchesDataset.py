@@ -34,5 +34,4 @@ class CustomPatchesDataset(Dataset):
         if self.transform is not None:
             patch_img = self.transform(patch_img)
             
-        #patch = pil_to_tensor(patch_img)
         return patch_img, label
