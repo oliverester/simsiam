@@ -9,14 +9,9 @@
             "name": "Python: main simsiam",
             "type": "python",
             "request": "launch",
-            "program": "main_simsiam.py",
+            "program": "main_knn.py",
             "console": "integratedTerminal",
-            "args": [ "-a", "resnet50", 
-                "--dist-url", "tcp://localhost:10001",
-                "--gpu", "0", "--world-size", "1", "--rank", "0",
-                "--fix-pred-lr",
-                "--batch-size", "63",
-                "-data", "/home/oester/projects/up-detr/data/ILSVRC/Data/CLS-LOC"]
+            "justMyCode": false
         }
     ]
 }

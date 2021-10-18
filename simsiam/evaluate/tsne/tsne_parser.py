@@ -57,6 +57,9 @@ def tnse_parse_config(config_path=None,
                         help='checkpoint file in model folder')
     parser.add_argument('--dim', default=2048, type=int,
                         help='feature dimension (default: 2048)')
+    parser.add_argument('--test-sampling',
+                        choices=['down', 'up'],
+                        help='Choose weather test data should be up or downsampled')
     
     args = parser.parse_args()
     

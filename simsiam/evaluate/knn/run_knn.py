@@ -81,7 +81,7 @@ def main_worker(gpu, args):
 
     # Data loading code    
     data_provider = DataProvider(args=args)
-    train_loader, _ = data_provider.get_train_loader(aug=False)
+    train_loader, _ = data_provider.get_train_loader(aug=False, sampling=args.train_sampling)
     
     print("Determine train embeddings..")
     embeddings, labels = get_embeddings(train_loader, model, args)
@@ -90,7 +90,7 @@ def main_worker(gpu, args):
     print("Provide KNN-classifier")
     
      # Data loading code
-    val_loader = data_provider.get_val_loader()
+    val_loader = data_provider.get_val_loader(sampling=args.test_sampling)
 
     print("Determine validation embeddings..")
     test_embeddings, test_labels = get_embeddings(val_loader, model, args)
@@ -99,11 +99,17 @@ def main_worker(gpu, args):
     print("Predict validation embeddings..")
     test_pred = knn_classifier.predict(X=test_embeddings)
     
-    from sklearn.metrics import classification_report, confusion_matrix, roc_auc_score, roc_curve
-    print(confusion_matrix(y_true=test_labels, y_pred=test_pred)) 
+    from sklearn.metrics import classification_report, roc_auc_score, roc_curve, confusion_matrix
+    import pandas as pd
+    cmtx = pd.DataFrame(
+    confusion_matrix(y_true=test_labels, y_pred=test_pred), 
+    index=['true:-1', 'true:1'], 
+    columns=['pred:-1', 'pred:1'])
+    print(cmtx)
+
     print(classification_report(y_true=test_labels, y_pred=test_pred))
     test_pred_prob = knn_classifier.predict_proba(X=test_embeddings)
-    print(roc_auc_score(y_true=test_labels, y_score=test_pred_prob[:,1]))
+    print(f'AUC: {roc_auc_score(y_true=test_labels, y_score=test_pred_prob[:,1])}')
     fpr, tpr, threshold = roc_curve(y_true=test_labels, y_score=test_pred_prob[:,1])
     
     df = pd.DataFrame(dict(fpr = fpr, tpr = tpr))

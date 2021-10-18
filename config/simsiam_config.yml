@@ -1,11 +1,11 @@
 a: resnet50
 dist-url: tcp://localhost:10001
-ngpus: 2
+ngpus: 6
 workers: 16
 world-size: 1 
 rank: 0 
 fix-pred-lr: true
-batch-size: 512
-epochs: 10
-train-data: /home/oester/projects/simsiam/data/camelyon16/train
+batch-size: 1024
+epochs: 100
+train-data: /homes/oester/datasets/camelyon16/preprocessed/training/tumor
 multiprocessing-distributed: true

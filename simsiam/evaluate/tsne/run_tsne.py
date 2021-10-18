@@ -36,6 +36,8 @@ def run_tsne(config_path):
     
     tracking.log_config(args.model_path, config_path)
       
+    args.pretrained = os.path.join(args.model_path, args.checkpoint)
+
     if args.seed is not None:
         random.seed(args.seed)
         torch.manual_seed(args.seed)
@@ -71,7 +73,7 @@ def main_worker(gpu,args):
 
     # Data loading code
     data_provider = DataProvider(args=args)
-    val_loader = data_provider.get_val_loader()
+    val_loader = data_provider.get_val_loader(sampling=args.test_sampling)
 
     embeddings, labels = get_embeddings(val_loader, model, args)
     visualize_tsne(embeddings=embeddings, 

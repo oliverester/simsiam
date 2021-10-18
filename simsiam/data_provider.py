@@ -5,8 +5,9 @@ import torchvision.transforms as transforms
 import torchvision.datasets as datasets
 import simsiam
 import simsiam.loader
-from custom_datasets.CustomPatchesDataset import CustomPatchesDataset
-from custom_datasets.wsi_dataset.WSIDatasetFolder import WSIDatasetFolder
+from ship_ai.pre_histo.pytorch_datasets.CustomPatchesDataset import CustomPatchesDataset
+from ship_ai.pre_histo.pytorch_datasets.wsi_dataset.WSIDatasetFolder import WSIDatasetFolder
+
 
 class DataProvider():
     
@@ -37,7 +38,7 @@ class DataProvider():
         
         self.aug_transform = simsiam.loader.TwoCropsTransform(transforms.Compose(augmentation))
 
-    def get_train_loader(self, aug=True):
+    def get_train_loader(self, aug=True, sampling='up'):
         # Data loading code
         traindir = self.args.train_data
         
@@ -47,8 +48,9 @@ class DataProvider():
         #     traindir,
         #     self.aug_transform if aug else self.non_aug_transform)
 
-        train_dataset = CustomPatchesDataset(wsi_dataset=WSIDatasetFolder(root_folder=traindir), 
-                                             transform=self.aug_transform if aug else self.non_aug_transform)
+        train_dataset = CustomPatchesDataset(wsi_dataset=WSIDatasetFolder(root_folder=traindir, 
+                root_contains_wsi_label=False, sampling=sampling, debug=False),
+                transform=self.aug_transform if aug else self.non_aug_transform)
         
         if 'distributed' in self.args and self.args.distributed:
             train_sampler = torch.utils.data.distributed.DistributedSampler(train_dataset)
@@ -62,13 +64,13 @@ class DataProvider():
         
         return train_loader, train_sampler
     
-    def get_val_loader(self):
+    def get_val_loader(self, sampling=None):
         
         validir = self.args.test_data
         
         #val_dataset = datasets.ImageFolder(validir, self.non_aug_transform)
 
-        val_dataset = CustomPatchesDataset(wsi_dataset=WSIDatasetFolder(root_folder=validir), 
+        val_dataset = CustomPatchesDataset(wsi_dataset=WSIDatasetFolder(root_folder=validir, root_contains_wsi_label=False, sampling=sampling, debug=False), 
                                            transform=self.non_aug_transform)
         # validation loader does not have distributed loader. So, each GPU runs a full validation run. However, only rank 0 prints
         val_loader = torch.utils.data.DataLoader(

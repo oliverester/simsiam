@@ -7,7 +7,7 @@ model_names = sorted(name for name in models.__dict__
     and callable(models.__dict__[name]))
 
 
-def knn_parse_config(config_path=None, 
+def embedding_parse_config(config_path=None, 
                         verbose=False):
         
     parser = configargparse.ArgumentParser(description='PyTorch ImageNet Training',
